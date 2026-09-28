@@ -106,7 +106,9 @@ func waitForSource(t *testing.T, what string, cond func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-func withFakeDial(t *testing.T, sessions *[]*fakeSession) {
+// withFakeDial replaces the dialer and returns a race-free count of the
+// sessions it opened — the runners append from their own goroutines.
+func withFakeDial(t *testing.T, sessions *[]*fakeSession) (opened func() int) {
 	t.Helper()
 	var mu sync.Mutex
 	prev := dialSource
@@ -121,6 +123,11 @@ func withFakeDial(t *testing.T, sessions *[]*fakeSession) {
 		return s, nil
 	}
 	t.Cleanup(func() { dialSource = prev })
+	return func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(*sessions)
+	}
 }
 
 func TestSatelliteReportsUnderTheTargetHost(t *testing.T) {
@@ -156,14 +163,14 @@ func TestSatelliteReportsUnderTheTargetHost(t *testing.T) {
 
 func TestSatelliteKeepsUnchangedSourcesRunning(t *testing.T) {
 	var sessions []*fakeSession
-	withFakeDial(t, &sessions)
+	opened := withFakeDial(t, &sessions)
 	rec := &recorder{}
 	sat := newSatellite(slog.New(slog.DiscardHandler), rec.send)
 	defer sat.stop()
 	ctx := context.Background()
 
 	sat.apply(ctx, []protocol.SourceConfig{source("10.0.0.5")})
-	waitForSource(t, "first session", func() bool { return len(sessions) == 1 })
+	waitForSource(t, "first session", func() bool { return opened() == 1 })
 
 	// Same config again: the poller must survive, because restarting it would
 	// throw away the counter history and cost an interval of rates.
@@ -172,13 +179,13 @@ func TestSatelliteKeepsUnchangedSourcesRunning(t *testing.T) {
 		t.Fatalf("running sources = %d", sat.count())
 	}
 	time.Sleep(50 * time.Millisecond)
-	if len(sessions) != 1 {
-		t.Errorf("unchanged source was restarted (%d sessions)", len(sessions))
+	if n := opened(); n != 1 {
+		t.Errorf("unchanged source was restarted (%d sessions)", n)
 	}
 
 	// A changed address must take effect at once.
 	sat.apply(ctx, []protocol.SourceConfig{source("10.0.0.6")})
-	waitForSource(t, "restart after change", func() bool { return len(sessions) == 2 })
+	waitForSource(t, "restart after change", func() bool { return opened() == 2 })
 
 	// Removing it stops the poller.
 	sat.apply(ctx, nil)

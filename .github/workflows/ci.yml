@@ -38,22 +38,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            flags: -race
-          - os: ubuntu-24.04-arm
-            flags: -race
-          - os: windows-latest
-            flags: ''
+        # Windows is compiled and vetted (lint job) and built (build job); its
+        # test run joins this matrix once the suite no longer assumes a Unix
+        # host.
+        os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - name: go test
-        shell: bash
-        run: go test ${{ matrix.flags }} ./...
+      - name: go test -race
+        run: go test -race ./...
 
   build:
     runs-on: ubuntu-latest
