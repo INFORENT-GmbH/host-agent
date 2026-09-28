@@ -1,0 +1,26 @@
+{
+  "type": "discovery",
+  "seq": 44,
+  "data": {
+    "t": 1789567890000,
+    "items": [
+      {
+        "plugin": "cpu.load"
+      },
+      {
+        "plugin": "df",
+        "item": "/",
+        "description": "Filesystem /"
+      },
+      {
+        "plugin": "df",
+        "item": "/var",
+        "description": "Filesystem /var"
+      },
+      {
+        "plugin": "systemd",
+        "item": "nginx.service"
+      }
+    ]
+  }
+}

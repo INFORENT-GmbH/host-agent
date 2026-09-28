@@ -1,0 +1,32 @@
+#!/bin/sh
+# postinst — deb calls this with "configure" on install AND on upgrade.
+set -e
+
+# Satellite poller user (unprivileged). The naming rule _<key>-poller
+# always stays below the Linux limit of 32 characters because brand keys
+# are capped at 24 characters — keep in sync:
+# BRAND_KEY_RE (api/src/settings/brands.ts), PollerUser (internal/brand).
+if ! getent passwd '_${BRAND}-poller' >/dev/null 2>&1; then
+    useradd --system --shell /usr/sbin/nologin --no-create-home \
+        --home-dir '/var/lib/${BRAND}-agent' '_${BRAND}-poller'
+fi
+
+# Switch the apt source to the descriptive component: the repository ships
+# the same packages under `main` and `agent`, and this is exactly the file
+# the self-update reads (Dir::Etc::SourceList). A source that still points
+# at `main` is rewritten here — if it has already been switched or does not
+# exist, nothing happens. This must never fail: a broken source would be
+# worse than the old component.
+LIST='/etc/apt/sources.list.d/${BRAND}-agent.list'
+if [ -f "$LIST" ]; then
+    sed -i -E 's#^(deb .+ (stable|testing)) main$#\1 agent#' "$LIST" || true
+fi
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+    # Upgrade: only restart where the agent is already running. A first
+    # install starts nothing — that is left to "${BRAND}-agent enroll".
+    if systemctl is-active --quiet '${BRAND}-agent.service'; then
+        systemctl restart '${BRAND}-agent.service' || true
+    fi
+fi

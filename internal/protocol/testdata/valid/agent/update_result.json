@@ -1,0 +1,9 @@
+{
+  "type": "update_result",
+  "seq": 46,
+  "data": {
+    "version": "1.2.0",
+    "ok": false,
+    "error": "E: Version '1.2.0' for 'acme-agent' was not found"
+  }
+}

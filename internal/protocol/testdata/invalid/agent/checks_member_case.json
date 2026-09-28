@@ -1,0 +1,16 @@
+{
+  "type": "checks",
+  "seq": 1,
+  "data": {
+    "t": 1789567890000,
+    "results": [
+      {
+        "Plugin": "df",
+        "item": "/",
+        "values": {
+          "used_bytes": 1
+        }
+      }
+    ]
+  }
+}

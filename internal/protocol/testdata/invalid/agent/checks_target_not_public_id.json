@@ -1,0 +1,17 @@
+{
+  "type": "checks",
+  "seq": 46,
+  "data": {
+    "t": 1758480060000,
+    "target": "../../etc/passwd",
+    "results": [
+      {
+        "plugin": "if",
+        "item": "Gi1/0/1",
+        "values": {
+          "link_up": 1
+        }
+      }
+    ]
+  }
+}

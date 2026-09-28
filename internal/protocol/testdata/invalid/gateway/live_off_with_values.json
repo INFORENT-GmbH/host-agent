@@ -1,0 +1,8 @@
+{
+  "type": "live",
+  "data": {
+    "on": false,
+    "intervalMs": 1000,
+    "ttlS": 60
+  }
+}

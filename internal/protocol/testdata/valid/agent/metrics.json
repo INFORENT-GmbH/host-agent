@@ -1,0 +1,27 @@
+{
+  "type": "metrics",
+  "seq": 42,
+  "data": {
+    "t": 1789567890000,
+    "series": [
+      {
+        "name": "cpu.util",
+        "labels": {
+          "cpu": "total"
+        },
+        "value": 12.5
+      },
+      {
+        "name": "load.1",
+        "value": 0.42
+      },
+      {
+        "name": "fs.used_bytes",
+        "labels": {
+          "mount": "/var"
+        },
+        "value": 123456789
+      }
+    ]
+  }
+}

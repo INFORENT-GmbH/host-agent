@@ -1,0 +1,12 @@
+{
+  "type": "config",
+  "data": {
+    "version": 1,
+    "intervals": {
+      "metricsS": 1,
+      "checksS": 60,
+      "discoveryS": 7200,
+      "inventoryS": 3600
+    }
+  }
+}

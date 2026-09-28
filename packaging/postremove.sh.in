@@ -1,0 +1,12 @@
+#!/bin/sh
+# postrm — for deb, $1 is "remove", "purge" or "upgrade", among others.
+set -e
+if [ "$1" = "purge" ]; then
+    # This removes the host token, the send buffer and the configuration.
+    # The poller user stays (Debian convention: purge deletes no users,
+    # otherwise files are orphaned or a UID gets reused).
+    rm -rf '/etc/${BRAND}-agent' '/var/lib/${BRAND}-agent'
+fi
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi

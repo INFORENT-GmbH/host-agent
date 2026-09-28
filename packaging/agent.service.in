@@ -1,0 +1,22 @@
+[Unit]
+Description=${BRAND} host monitoring agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/${BRAND}-agent run
+Restart=on-failure
+RestartSec=5
+# Mandatory hardening.
+# The self-update runs as a transient systemd unit outside this sandbox and
+# this cgroup — it needs a writable /etc and survives dpkg restarting the
+# service.
+ProtectSystem=strict
+ReadWritePaths=/var/lib/${BRAND}-agent
+NoNewPrivileges=yes
+PrivateTmp=yes
+MemoryMax=128M
+CPUQuota=20%
+
+[Install]
+WantedBy=multi-user.target

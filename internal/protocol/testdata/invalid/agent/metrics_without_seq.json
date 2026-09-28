@@ -1,0 +1,12 @@
+{
+  "type": "metrics",
+  "data": {
+    "t": 1789567890000,
+    "series": [
+      {
+        "name": "load.1",
+        "value": 0.42
+      }
+    ]
+  }
+}

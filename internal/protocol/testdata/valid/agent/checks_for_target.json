@@ -1,0 +1,28 @@
+{
+  "type": "checks",
+  "seq": 44,
+  "data": {
+    "t": 1758480060000,
+    "target": "1a2b3c4d5e6f708192a3b4c5",
+    "results": [
+      {
+        "plugin": "if",
+        "item": "Gi1/0/1",
+        "values": {
+          "link_up": 1,
+          "speed_mbps": 1000,
+          "rx_bytes_per_sec": 43750000
+        }
+      },
+      {
+        "plugin": "sensor",
+        "item": "Switch 1 - Inlet Temp Sensor",
+        "state": 0,
+        "summary": "temperature 28 °C (normal)",
+        "values": {
+          "temperature_celsius": 28
+        }
+      }
+    ]
+  }
+}

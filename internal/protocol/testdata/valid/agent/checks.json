@@ -1,0 +1,46 @@
+{
+  "type": "checks",
+  "seq": 43,
+  "data": {
+    "t": 1789567890000,
+    "results": [
+      {
+        "plugin": "df",
+        "item": "/var",
+        "values": {
+          "used_bytes": 123456789,
+          "size_bytes": 987654321
+        }
+      },
+      {
+        "plugin": "local",
+        "item": "Backup nightly",
+        "state": 2,
+        "summary": "last run failed\nsee /var/log/backup.log",
+        "perf": [
+          {
+            "name": "age",
+            "value": 93600,
+            "unit": "s",
+            "warn": 86400,
+            "crit": 90000
+          }
+        ]
+      },
+      {
+        "plugin": "local",
+        "item": "Queue length",
+        "summary": "state P: judged by the gateway",
+        "perf": [
+          {
+            "name": "queue",
+            "value": 17,
+            "warn": 50,
+            "crit": 100,
+            "min": 0
+          }
+        ]
+      }
+    ]
+  }
+}

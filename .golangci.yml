@@ -1,0 +1,17 @@
+version: "2"
+
+# The agent runs as root on customer hosts — gosec and the error/response
+# linters are part of the gate, not optional extras.
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - unconvert
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

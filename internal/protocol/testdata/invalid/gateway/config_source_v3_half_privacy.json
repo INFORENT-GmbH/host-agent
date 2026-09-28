@@ -1,0 +1,29 @@
+{
+  "type": "config",
+  "data": {
+    "version": 9,
+    "intervals": {
+      "metricsS": 10,
+      "checksS": 60,
+      "discoveryS": 7200,
+      "inventoryS": 3600
+    },
+    "sources": [
+      {
+        "id": "9f2c1a4b7d8e0f3a5b6c7d8e",
+        "target": "1a2b3c4d5e6f708192a3b4c5",
+        "kind": "snmp",
+        "address": "10.0.0.5",
+        "port": 161,
+        "intervalS": 60,
+        "timeoutMs": 3000,
+        "retries": 1,
+        "snmpVersion": "3",
+        "snmpUser": "portal",
+        "snmpAuthProto": "SHA",
+        "snmpAuthKey": "not-a-real-auth-key",
+        "snmpPrivProto": "AES"
+      }
+    ]
+  }
+}

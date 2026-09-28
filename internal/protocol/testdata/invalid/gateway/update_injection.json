@@ -1,0 +1,6 @@
+{
+  "type": "update",
+  "data": {
+    "version": "1.2.0; rm -rf /"
+  }
+}

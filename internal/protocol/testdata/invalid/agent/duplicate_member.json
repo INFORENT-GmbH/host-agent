@@ -1,0 +1,1 @@
+{"type": "metrics", "type": "hello", "seq": 1, "data": {"t": 1, "series": [{"name": "a", "value": 1}]}}

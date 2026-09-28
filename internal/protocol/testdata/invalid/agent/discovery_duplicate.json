@@ -1,0 +1,17 @@
+{
+  "type": "discovery",
+  "seq": 1,
+  "data": {
+    "t": 1789567890000,
+    "items": [
+      {
+        "plugin": "df",
+        "item": "/"
+      },
+      {
+        "plugin": "df",
+        "item": "/"
+      }
+    ]
+  }
+}

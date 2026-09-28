@@ -1,0 +1,10 @@
+{
+  "type": "inventory",
+  "seq": 1,
+  "data": {
+    "t": 1789567890000,
+    "kind": "packages",
+    "hash": "ABC",
+    "data": {}
+  }
+}

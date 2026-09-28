@@ -1,0 +1,77 @@
+# CI of the public repository. GitHub-hosted runners only: a public repo must
+# never run fork code on self-hosted machines.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go mod tidy
+        run: go mod tidy -diff
+      - name: go vet (linux, windows)
+        run: |
+          go vet ./...
+          GOOS=windows GOARCH=amd64 go vet ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            flags: -race
+          - os: ubuntu-24.04-arm
+            flags: -race
+          - os: windows-latest
+            flags: ''
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test
+        shell: bash
+        run: go test ${{ matrix.flags }} ./...
+
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [linux/amd64, linux/arm64, windows/amd64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: build
+        env:
+          TARGET: ${{ matrix.target }}
+          CGO_ENABLED: '0'
+        run: |
+          export GOOS="${TARGET%/*}" GOARCH="${TARGET#*/}"
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/INFORENT-GmbH/host-agent/internal/buildinfo.Version=$(cat VERSION)" \
+            -o /tmp/agent ./cmd/agent
+          echo "built $(cat VERSION) for $TARGET"

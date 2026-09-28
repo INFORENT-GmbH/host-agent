@@ -1,0 +1,13 @@
+{
+  "type": "source_status",
+  "seq": 42,
+  "data": {
+    "t": 1758480000000,
+    "source": "9f2c1a4b7d8e0f3a5b6c7d8e",
+    "target": "1a2b3c4d5e6f708192a3b4c5",
+    "ok": true,
+    "sysName": "sw-fra-core01",
+    "sysObjectId": "1.3.6.1.4.1.9.1.2494",
+    "vendor": "cisco"
+  }
+}

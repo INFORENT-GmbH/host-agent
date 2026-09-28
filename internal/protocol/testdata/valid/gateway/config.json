@@ -1,0 +1,15 @@
+{
+  "type": "config",
+  "data": {
+    "version": 7,
+    "intervals": {
+      "metricsS": 10,
+      "checksS": 60,
+      "discoveryS": 7200,
+      "inventoryS": 3600
+    },
+    "disabledCollectors": [
+      "docker"
+    ]
+  }
+}

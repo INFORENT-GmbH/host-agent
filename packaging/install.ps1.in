@@ -1,0 +1,187 @@
+<#
+.SYNOPSIS
+  Guided setup for the @BRAND@ monitoring agent on Windows.
+
+.DESCRIPTION
+  Published by the @BRAND@ portal at https://@AGENT_HOST@/install.ps1 — read it
+  before running it as an administrator. It downloads the signed installer from
+  https://@APT_HOST@, verifies its SHA-256 against the channel manifest,
+  installs the service and registers this host with https://@AGENT_HOST@.
+
+  Requires Windows Server 2016 / Windows 10 (1607) or newer, amd64.
+
+  Uninstall: install.ps1 -Uninstall (removes the service, the program files and
+  the configuration), then remove the host in the portal.
+#>
+[CmdletBinding()]
+param(
+  [string]$Token,
+  [string]$TokenFile,
+  [ValidateSet('stable', 'testing', 'off', '')]
+  [string]$Channel = '',
+  [switch]$NoLocalChecks,
+  [switch]$Force,
+  [switch]$Uninstall
+)
+
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$Brand      = '@BRAND@'
+$AgentHost  = '@AGENT_HOST@'
+$AptHost    = '@APT_HOST@'
+
+$Pkg        = "$Brand-agent"
+$Gateway    = "https://$AgentHost"
+$PackageBase = "https://$AptHost"
+$InstallDir = Join-Path $env:ProgramFiles $Pkg
+$ExePath    = Join-Path $InstallDir "$Pkg.exe"
+$ConfigDir  = Join-Path $env:ProgramData $Pkg
+
+# Enable TLS 1.2 explicitly: Windows Server 2016 still negotiates TLS 1.0 by
+# default, and the installer download must not fall back to it.
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+
+$script:Step = 0
+$script:Steps = 6
+function Write-Step($Text) {
+  $script:Step++
+  Write-Host ("[{0}/{1}] {2}" -f $script:Step, $script:Steps, $Text) -ForegroundColor Cyan
+}
+function Write-Ok($Text)   { Write-Host "      $Text" -ForegroundColor Green }
+function Write-Warn($Text) { Write-Host "      $Text" -ForegroundColor Yellow }
+function Die($Text) {
+  Write-Host ""
+  Write-Host "  $Text" -ForegroundColor Red
+  exit 1
+}
+
+function Assert-Administrator {
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $principal = New-Object Security.Principal.WindowsPrincipal($id)
+  if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Die "Run this in an elevated PowerShell (Run as administrator)."
+  }
+}
+
+# ── Uninstall ─────────────────────────────────────────────────────────────
+function Invoke-Uninstall {
+  Write-Host "Removing $Pkg" -ForegroundColor Cyan
+  $product = Get-CimInstance -ClassName Win32_Product -Filter "Name='$Pkg'" -ErrorAction SilentlyContinue
+  if ($product) {
+    Write-Host "      uninstalling the MSI"
+    $null = $product | Invoke-CimMethod -MethodName Uninstall
+  } else {
+    # No MSI entry (manual installation): at least remove the service.
+    if (Get-Service -Name $Pkg -ErrorAction SilentlyContinue) {
+      Stop-Service -Name $Pkg -Force -ErrorAction SilentlyContinue
+      & sc.exe delete $Pkg | Out-Null
+    }
+  }
+  if (Test-Path $ConfigDir) { Remove-Item -Recurse -Force $ConfigDir }
+  if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
+  Write-Ok "removed — now delete the host in the portal"
+}
+
+# ── Secure the configuration directory ────────────────────────────────────
+# %ProgramData% passes read access for the local "Users" group down by
+# inheritance. agent.conf holds the host token, and the agent REJECTS such an
+# inherited ACL at startup (internal/winsec). So: disable inheritance here and
+# allow only SYSTEM and Administrators — the same rule the agent checks.
+function Protect-ConfigDir {
+  if (-not (Test-Path $ConfigDir)) {
+    $null = New-Item -ItemType Directory -Path $ConfigDir -Force
+  }
+  $acl = Get-Acl $ConfigDir
+  $acl.SetAccessRuleProtection($true, $false)   # inheritance off, copy nothing
+  foreach ($rule in @($acl.Access)) { $null = $acl.RemoveAccessRule($rule) }
+  foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
+    $account = New-Object Security.Principal.SecurityIdentifier($sid)
+    $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+      $account, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+  }
+  $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-18')))
+  Set-Acl -Path $ConfigDir -AclObject $acl
+}
+
+# ── Main flow ─────────────────────────────────────────────────────────────
+Assert-Administrator
+if ($Uninstall) { Invoke-Uninstall; exit 0 }
+
+if ($TokenFile) {
+  if (-not (Test-Path $TokenFile)) { Die "Token file $TokenFile not found." }
+  $Token = (Get-Content -Raw $TokenFile).Trim()
+  Remove-Item -Force $TokenFile
+}
+if (-not $Token) { $Token = Read-Host "Enrollment token from the portal" }
+if (-not $Token) { Die "No enrollment token. Create one in the portal under Monitoring - Servers." }
+
+if ((Get-Service -Name $Pkg -ErrorAction SilentlyContinue) -and -not $Force) {
+  Die "$Pkg is already installed. Re-register with -Force, or remove it with -Uninstall."
+}
+
+Write-Step "checking the platform"
+if ([Environment]::Is64BitOperatingSystem -ne $true) { Die "Only 64-bit Windows is supported." }
+$build = [Environment]::OSVersion.Version.Build
+if ($build -lt 14393) { Die "Windows Server 2016 / Windows 10 (1607) or newer is required (build $build)." }
+Write-Ok "Windows build $build, amd64"
+
+Write-Step "fetching the release manifest"
+$channelName = if ($Channel -and $Channel -ne 'off') { $Channel } else { 'stable' }
+$manifestUrl = "$PackageBase/windows/$channelName.json"
+try {
+  $manifest = Invoke-RestMethod -Uri $manifestUrl -UseBasicParsing
+} catch {
+  Die "No $channelName release published yet ($manifestUrl): $($_.Exception.Message)"
+}
+if (-not $manifest.file -or -not $manifest.sha256) { Die "The manifest at $manifestUrl is incomplete." }
+Write-Ok "version $($manifest.version)"
+
+Write-Step "downloading the installer"
+$msi = Join-Path $env:TEMP $manifest.file
+Invoke-WebRequest -Uri "$PackageBase/windows/$($manifest.file)" -OutFile $msi -UseBasicParsing
+$actual = (Get-FileHash -Algorithm SHA256 -Path $msi).Hash
+if ($actual -ne $manifest.sha256.ToUpper()) {
+  Remove-Item -Force $msi
+  Die "Checksum mismatch for $($manifest.file) - refusing to install."
+}
+Write-Ok "sha256 verified"
+
+Write-Step "installing the service"
+$log = Join-Path $env:TEMP "$Pkg-install.log"
+$proc = Start-Process msiexec.exe -ArgumentList @('/i', "`"$msi`"", '/qn', '/norestart', '/l*v', "`"$log`"") -Wait -PassThru
+if ($proc.ExitCode -ne 0) { Die "msiexec failed with exit code $($proc.ExitCode). Log: $log" }
+Remove-Item -Force $msi
+Write-Ok "installed to $InstallDir"
+
+Write-Step "registering this host"
+Protect-ConfigDir
+# -package-base tells the agent where to fetch its own updates from; on
+# Linux this lives in the apt source, on Windows only here.
+$enrollArgs = @('enroll', '-url', $Gateway, '-package-base', $PackageBase)
+if ($Channel) { $enrollArgs += @('-channel', $Channel) }
+if ($NoLocalChecks) { $enrollArgs += '-local-checks=false' }
+if ($Force) { $enrollArgs += '-force' }
+# The token is passed via the environment, not as an argument: arguments show
+# up in the process list and in the PowerShell history.
+$env:AGENT_ENROLL_TOKEN = $Token
+try {
+  & $ExePath @enrollArgs
+  if ($LASTEXITCODE -ne 0) { Die "Registration failed (exit code $LASTEXITCODE)." }
+} finally {
+  Remove-Item Env:\AGENT_ENROLL_TOKEN -ErrorAction SilentlyContinue
+}
+Write-Ok "registered with $Gateway"
+
+Write-Step "starting the service"
+Restart-Service -Name $Pkg -Force
+Start-Sleep -Seconds 3
+$svc = Get-Service -Name $Pkg
+if ($svc.Status -ne 'Running') {
+  Die "The service is $($svc.Status). Check the Windows event log for source $Pkg."
+}
+Write-Ok "$Pkg is running"
+
+Write-Host ""
+Write-Host "  Done. The host appears in the portal within a minute." -ForegroundColor Green
+Write-Host "  Logs: Event Viewer - Windows Logs - Application, source $Pkg" -ForegroundColor DarkGray

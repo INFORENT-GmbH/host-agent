@@ -1,0 +1,469 @@
+#!/usr/bin/env bash
+#
+# Guided setup for the @BRAND@ monitoring agent on Debian and Ubuntu.
+#
+# Published by the @BRAND@ portal at https://@AGENT_HOST@/install.sh — read it
+# before running it as root. It adds the package source and its signing key,
+# installs the agent, registers this host with https://@AGENT_HOST@ and starts
+# the service. Everything it asks can also be passed as an option (--help).
+#
+# Uninstall: apt-get purge @BRAND@-agent, then remove the host in the portal.
+#
+set -Eeuo pipefail
+
+BRAND='@BRAND@'
+AGENT_HOST='@AGENT_HOST@'
+APT_HOST='@APT_HOST@'
+
+PKG="$BRAND-agent"
+KEYRING_PKG="$BRAND-archive-keyring"
+KEYRING="/usr/share/keyrings/$KEYRING_PKG.gpg"
+REPO="https://$APT_HOST"
+GATEWAY="https://$AGENT_HOST"
+LIST_FILE="/etc/apt/sources.list.d/$PKG.list"
+PIN_FILE="/etc/apt/preferences.d/$PKG"
+APT_PROXY_FILE="/etc/apt/apt.conf.d/20$PKG-proxy"
+UNIT_DROPIN_DIR="/etc/systemd/system/$PKG.service.d"
+
+TOKEN=""
+TOKEN_FILE=""
+CHANNEL=""
+LOCAL_CHECKS=""
+PROXY=""
+ASSUME_YES=0
+FORCE=0
+REINSTALL=0
+UNINSTALL=0
+FIX_CLONE_ID=0
+STEP=0
+STEPS=8
+
+# ── Output ───────────────────────────────────────────────────────────────
+if [ -t 1 ] && [ "${TERM:-dumb}" != dumb ]; then
+  B=$'\033[1m'; DIM=$'\033[2m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; R=$'\033[0m'
+else
+  B=""; DIM=""; GREEN=""; YELLOW=""; RED=""; R=""
+fi
+say()  { printf '%s\n' "$*"; }
+step() { STEP=$((STEP + 1)); printf '\n%s[%d/%d]%s %s\n' "$B" "$STEP" "$STEPS" "$R" "$*"; }
+ok()   { printf '  %s✓%s %s\n' "$GREEN" "$R" "$*"; }
+warn() { printf '  %s!%s %s\n' "$YELLOW" "$R" "$*" >&2; }
+die()  { printf '\n%serror:%s %s\n' "$RED" "$R" "$*" >&2; exit 1; }
+
+# Clones share /etc/machine-id; the portal then takes them for the same machine.
+# The new ID is GENERATED before the old one is replaced — otherwise a failed
+# systemd-machine-id-setup would leave the host without a machine-id.
+# /proc/sys/kernel/random/uuid exists on every Linux, even without systemd tools.
+regenerate_machine_id() {
+  local new
+  new="$(tr -d '\n-' < /proc/sys/kernel/random/uuid)"
+  [ ${#new} = 32 ] || die "cannot generate a machine-id"
+  printf '%s\n' "$new" > /etc/machine-id
+  chmod 0444 /etc/machine-id
+  if [ -d /var/lib/dbus ]; then ln -sfn /etc/machine-id /var/lib/dbus/machine-id; fi
+  MACHINE_ID="$new"
+  ok "new machine-id $new (systemd itself keeps the old one until the next reboot)"
+}
+
+
+usage() {
+  cat <<EOF
+Usage: install.sh [options]
+
+Installs and enrolls the $BRAND monitoring agent on this Debian or Ubuntu
+host. Without options it asks for everything it needs.
+
+Options:
+  --token <token>        enroll token from the portal (or set AGENT_ENROLL_TOKEN)
+  --token-file <path>    read the token from this file and delete the file
+  --channel <channel>    update channel: stable (default), testing or off
+  --local-checks <y|n>   run local check scripts and MRPE entries (default: yes)
+  --proxy <url>          HTTP proxy for apt and the gateway, e.g. http://10.0.0.1:3128
+  --uninstall            remove the agent, its apt source, pins and keys
+  --fix-clone-id         if the gateway rejects the enrollment because another
+                         host already uses this machine-id (a template clone),
+                         give this machine a new id and retry — unattended
+  --reinstall            start over: purge the agent, give this machine a NEW
+                         id and register it as a new server (the old entry stays
+                         in the portal until you remove it)
+  --force                replace an existing enrollment without asking
+  -y, --yes              no questions; needs --token
+  -h, --help             show this help
+EOF
+}
+
+# ── Options ──────────────────────────────────────────────────────────────
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --token)        TOKEN="${2:-}"; shift 2 ;;
+    --token=*)      TOKEN="${1#*=}"; shift ;;
+    --token-file)   TOKEN_FILE="${2:-}"; shift 2 ;;
+    --token-file=*) TOKEN_FILE="${1#*=}"; shift ;;
+    --channel)      CHANNEL="${2:-}"; shift 2 ;;
+    --channel=*)    CHANNEL="${1#*=}"; shift ;;
+    --local-checks) LOCAL_CHECKS="${2:-}"; shift 2 ;;
+    --local-checks=*) LOCAL_CHECKS="${1#*=}"; shift ;;
+    --proxy)        PROXY="${2:-}"; shift 2 ;;
+    --proxy=*)      PROXY="${1#*=}"; shift ;;
+    --uninstall)    UNINSTALL=1; shift ;;
+    --fix-clone-id) FIX_CLONE_ID=1; shift ;;
+    --reinstall)    REINSTALL=1; FORCE=1; shift ;;
+    --force)        FORCE=1; shift ;;
+    -y|--yes)       ASSUME_YES=1; shift ;;
+    -h|--help)      usage; exit 0 ;;
+    *)              usage >&2; die "unknown option: $1" ;;
+  esac
+done
+[ -n "$TOKEN" ] || TOKEN="${AGENT_ENROLL_TOKEN:-}"
+[ -z "$TOKEN" ] || [ -z "$TOKEN_FILE" ] || die "--token and --token-file exclude each other"
+if [ "$UNINSTALL" = 1 ] && { [ "$REINSTALL" = 1 ] || [ -n "$TOKEN" ] || [ -n "$TOKEN_FILE" ]; }; then
+  die "--uninstall does not combine with --reinstall or a token"
+fi
+
+case "${LOCAL_CHECKS,,}" in
+  ""|y|yes|true|1)  LOCAL_CHECKS="${LOCAL_CHECKS:+yes}" ;;
+  n|no|false|0)     LOCAL_CHECKS="no" ;;
+  *) die "--local-checks must be yes or no" ;;
+esac
+case "$CHANNEL" in ""|stable|testing|off) ;; *) die "--channel must be stable, testing or off" ;; esac
+[ -z "$PROXY" ] || [[ "$PROXY" =~ ^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?/?$ ]] \
+  || die "--proxy must look like http://host:port"
+[ -z "$TOKEN" ] || [[ "$TOKEN" =~ ^[0-9a-f]{16,128}$ ]] || die "the enroll token must be 16-128 hex characters"
+
+# ── Questions ────────────────────────────────────────────────────────────
+# With `bash <(curl …)` stdin stays the terminal; otherwise fall back to /dev/tty.
+TTY_IN=""; TTY_OUT="/dev/stderr"
+if [ -t 0 ]; then TTY_IN="/dev/stdin"; elif [ -r /dev/tty ]; then TTY_IN="/dev/tty"; fi
+[ -w /dev/tty ] && TTY_OUT="/dev/tty"
+interactive() { [ "$ASSUME_YES" = 0 ] && [ -n "$TTY_IN" ]; }
+
+ask() { # ask <prompt> <default>; answer in REPLY_VALUE
+  local prompt="$1" default="${2:-}" answer=""
+  printf '%s' "$prompt" > "$TTY_OUT"
+  IFS= read -r answer < "$TTY_IN" || answer=""
+  REPLY_VALUE="${answer:-$default}"
+}
+ask_secret() {
+  local prompt="$1" answer=""
+  printf '%s' "$prompt" > "$TTY_OUT"
+  stty -echo < "$TTY_IN" 2>/dev/null || true
+  IFS= read -r answer < "$TTY_IN" || answer=""
+  stty echo < "$TTY_IN" 2>/dev/null || true
+  printf '\n' > "$TTY_OUT"
+  REPLY_VALUE="$answer"
+}
+ask_yesno() { # ask_yesno <prompt> <default y|n>
+  local default="$2"
+  while :; do
+    ask "$1 [$([ "$default" = y ] && echo 'Y/n' || echo 'y/N')]: " "$default"
+    case "${REPLY_VALUE,,}" in y|yes) return 0 ;; n|no) return 1 ;; esac
+  done
+}
+
+# ── Prerequisites ────────────────────────────────────────────────────────
+[ "$(id -u)" = 0 ] || die "run this as root (sudo -i, then start the setup again)"
+command -v apt-get >/dev/null 2>&1 || die "this setup needs Debian or Ubuntu (apt-get not found)"
+[ -d /run/systemd/system ] || die "this setup needs systemd as PID 1"
+command -v systemctl >/dev/null 2>&1 || die "systemctl not found"
+
+OS_NAME="unknown"; OS_VERSION=""
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_NAME="${NAME:-$ID}"; OS_VERSION="${VERSION_ID:-}"
+fi
+ARCH="$(dpkg --print-architecture)"
+case "$ARCH" in amd64|arm64) ;; *) die "no agent package for architecture $ARCH (amd64 and arm64 only)" ;; esac
+
+MACHINE_ID=""
+for f in /etc/machine-id /var/lib/dbus/machine-id; do
+  if [ -s "$f" ] && [ "$(tr -d ' \r\n' < "$f")" != uninitialized ]; then
+    MACHINE_ID="$(tr -d ' \r\n' < "$f")"; break
+  fi
+done
+[ -n "$MACHINE_ID" ] || die "no usable machine-id — run systemd-machine-id-setup first"
+
+ENROLLED=0
+[ -f "/etc/$PKG/agent.conf" ] && grep -q '^[[:space:]]*token[[:space:]]*=' "/etc/$PKG/agent.conf" 2>/dev/null && ENROLLED=1
+
+say "${B}$BRAND monitoring agent setup${R}"
+say "${DIM}host $(hostname -f 2>/dev/null || hostname) · $OS_NAME $OS_VERSION · $ARCH · gateway $AGENT_HOST${R}"
+
+# ── Uninstall: a separate, short path — no token, no channel, no forced
+# stable. The host entry in the portal stays until it is removed there.
+if [ "$UNINSTALL" = 1 ]; then
+  say ""
+  say "${B}About to remove:${R} the $PKG agent, its apt source, pins and keys."
+  say "The server entry in the portal stays until you remove it there."
+  if interactive; then
+    ask_yesno "Remove the agent from this server?" n || { say "nothing changed."; exit 0; }
+  elif [ "$ASSUME_YES" = 0 ]; then
+    die "no terminal — pass --yes to uninstall without asking"
+  fi
+  systemctl disable --now "$PKG" >/dev/null 2>&1 || true
+  # purge takes /etc/$PKG and /var/lib/$PKG with it; the source, pins and keys
+  # were written by the setup, not by the package — so they are removed by hand.
+  apt-get purge -y -qq "$PKG" "$KEYRING_PKG" >/dev/null 2>&1 || true
+  rm -f "$LIST_FILE" "$PIN_FILE" "$APT_PROXY_FILE" "$KEYRING"
+  rm -rf "$UNIT_DROPIN_DIR"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  apt-get update -qq >/dev/null 2>&1 || true
+  ok "removed — the host keeps running, only the agent is gone"
+  exit 0
+fi
+
+# Token from a file (e.g. placed by the portal via the guest agent): read it
+# once and delete it right away — it is a one-time token anyway.
+if [ -z "$TOKEN" ] && [ -n "$TOKEN_FILE" ]; then
+  [ -f "$TOKEN_FILE" ] || die "token file $TOKEN_FILE does not exist"
+  TOKEN="$(tr -d ' \t\r\n' < "$TOKEN_FILE")"
+  rm -f "$TOKEN_FILE"
+  [[ "$TOKEN" =~ ^[0-9a-f]{16,128}$ ]] || die "the token file does not hold a valid token"
+fi
+
+if [ "$ENROLLED" = 1 ] && [ "$FORCE" = 0 ] && [ "$REINSTALL" = 0 ]; then
+  if interactive; then
+    say ""
+    warn "this host is already enrolled — continuing replaces its token and keeps its history"
+    ask_yesno "Re-enroll this host?" n || { say "nothing changed."; exit 0; }
+  else
+    die "this host is already enrolled; pass --force to replace the enrollment"
+  fi
+  FORCE=1
+fi
+
+if [ -z "$TOKEN" ]; then
+  interactive || die "no enroll token — pass --token or set AGENT_ENROLL_TOKEN"
+  say ""
+  say "Create an enroll token in the portal: Monitoring › Servers › \"Add server\"."
+  for attempt in 1 2 3; do
+    ask_secret "Enroll token: "
+    TOKEN="$REPLY_VALUE"
+    [[ "$TOKEN" =~ ^[0-9a-f]{16,128}$ ]] && break
+    TOKEN=""
+    warn "that does not look like a token (16-128 hex characters)"
+    [ "$attempt" = 3 ] && die "no valid enroll token"
+  done
+fi
+
+if [ -z "$CHANNEL" ] && interactive; then
+  say ""
+  say "Automatic updates: the portal rolls new agent versions out in waves."
+  say "  1) stable   tested releases (recommended)"
+  say "  2) testing  new releases first"
+  say "  3) off      never update automatically"
+  while :; do
+    ask "Update channel [1]: " 1
+    case "$REPLY_VALUE" in
+      1|stable)  CHANNEL=stable;  break ;;
+      2|testing) CHANNEL=testing; break ;;
+      3|off)     CHANNEL=off;     break ;;
+    esac
+  done
+fi
+[ -n "$CHANNEL" ] || CHANNEL=stable
+
+if [ -z "$LOCAL_CHECKS" ] && interactive; then
+  say ""
+  say "Local checks run your own scripts in /usr/lib/check_mk_agent/local/,"
+  say "/etc/$PKG/local.d/ and MRPE entries as root."
+  ask_yesno "Enable local checks?" y && LOCAL_CHECKS=yes || LOCAL_CHECKS=no
+fi
+[ -n "$LOCAL_CHECKS" ] || LOCAL_CHECKS=yes
+
+if [ -z "$PROXY" ] && interactive; then
+  say ""
+  ask "HTTP proxy for apt and the gateway (empty for a direct connection): " ""
+  PROXY="$REPLY_VALUE"
+  [ -z "$PROXY" ] || [[ "$PROXY" =~ ^https?://[A-Za-z0-9._-]+(:[0-9]{1,5})?/?$ ]] \
+    || die "the proxy must look like http://host:port"
+fi
+
+# ── Summary ──────────────────────────────────────────────────────────────
+say ""
+say "${B}About to do this:${R}"
+printf '  %-16s %s\n' "package"      "$PKG (from $APT_HOST)"
+printf '  %-16s %s\n' "gateway"      "$GATEWAY"
+printf '  %-16s %s\n' "host"         "$(hostname -f 2>/dev/null || hostname)"
+printf '  %-16s %s\n' "machine-id"   "$MACHINE_ID"
+printf '  %-16s %s\n' "system"       "$OS_NAME $OS_VERSION ($ARCH)"
+printf '  %-16s %s\n' "updates"      "$CHANNEL"
+printf '  %-16s %s\n' "local checks" "$LOCAL_CHECKS"
+printf '  %-16s %s\n' "proxy"        "${PROXY:-none}"
+[ "$REINSTALL" = 1 ] && printf '  %-16s %s\n' "reinstall" "purge the agent and use a NEW machine-id"
+if interactive; then
+  say ""
+  ask_yesno "Continue?" y || { say "nothing changed."; exit 0; }
+fi
+
+trap 'die "step $STEP failed — fix the cause and run the setup again"' ERR
+
+# ── 1. Proxy ─────────────────────────────────────────────────────────────
+step "Proxy"
+if [ -n "$PROXY" ]; then
+  # Only for our hosts, so the rest of the system is left untouched.
+  cat > "$APT_PROXY_FILE" <<EOF
+Acquire::http::Proxy::$APT_HOST "$PROXY";
+Acquire::https::Proxy::$APT_HOST "$PROXY";
+EOF
+  mkdir -p "$UNIT_DROPIN_DIR"
+  cat > "$UNIT_DROPIN_DIR/proxy.conf" <<EOF
+[Service]
+Environment=HTTPS_PROXY=$PROXY
+Environment=HTTP_PROXY=$PROXY
+EOF
+  export HTTPS_PROXY="$PROXY" HTTP_PROXY="$PROXY"
+  ok "proxy written to $APT_PROXY_FILE and $UNIT_DROPIN_DIR/proxy.conf"
+else
+  rm -f "$APT_PROXY_FILE" "$UNIT_DROPIN_DIR/proxy.conf"
+  ok "direct connection"
+fi
+
+export DEBIAN_FRONTEND=noninteractive
+
+if [ "$REINSTALL" = 1 ]; then
+  say ""
+  say "${B}Starting over${R} — the old server entry stays in the portal until you remove it."
+fi
+
+# ── 2. Base packages ─────────────────────────────────────────────────────
+step "Base packages (ca-certificates, curl)"
+apt-get update -qq
+apt-get install -y -qq ca-certificates curl >/dev/null
+ok "present"
+
+# ── 3. Signing key ───────────────────────────────────────────────────────
+step "Repository key"
+tmp_key="$(mktemp)"
+curl -fsSL "$REPO/$KEYRING_PKG.gpg" -o "$tmp_key" \
+  || die "cannot download $REPO/$KEYRING_PKG.gpg — check DNS, firewall or proxy"
+[ -s "$tmp_key" ] || die "the downloaded key is empty"
+install -m 0644 "$tmp_key" "$KEYRING"
+rm -f "$tmp_key"
+ok "$KEYRING"
+
+# Check first, then write the apt source: a channel without a Release file
+# would otherwise make every future `apt-get update` on this host fail.
+curl -fsS -o /dev/null --max-time 20 "$REPO/dists/stable/Release" \
+  || die "$APT_HOST has no stable release yet — ask support before installing"
+
+# ── 4. apt source and pins ───────────────────────────────────────────────
+# One-line format: the self-update reads exactly this file. stable (500)
+# comes BEFORE testing (50) — a released version is in both channels, and
+# apt takes the first matching pin.
+step "apt source"
+printf '%s\n' \
+  "deb [signed-by=$KEYRING] $REPO stable agent" \
+  "deb [signed-by=$KEYRING] $REPO testing agent" > "$LIST_FILE"
+printf '%s\n' \
+  "Package: $PKG $KEYRING_PKG" "Pin: release n=stable" "Pin-Priority: 500" "" \
+  "Package: $PKG $KEYRING_PKG" "Pin: release n=testing" "Pin-Priority: 50" > "$PIN_FILE"
+ok "$LIST_FILE"
+
+# ── 5. Package ───────────────────────────────────────────────────────────
+step "Agent package"
+if [ "$REINSTALL" = 1 ]; then
+  # purge takes /etc/<brand>-agent and /var/lib/<brand>-agent with it — after
+  # that, no token, send buffer or earlier state is left.
+  systemctl disable --now "$PKG" >/dev/null 2>&1 || true
+  apt-get purge -y -qq "$PKG" >/dev/null 2>&1 || true
+  regenerate_machine_id
+fi
+apt-get update -qq
+if [ "$CHANNEL" = testing ]; then
+  # Channel testing requested: fetch the newer version explicitly; the pin stays.
+  apt-get install -y -qq -t testing "$PKG" "$KEYRING_PKG" >/dev/null \
+    || apt-get install -y -qq "$PKG" "$KEYRING_PKG" >/dev/null
+else
+  apt-get install -y -qq "$PKG" "$KEYRING_PKG" >/dev/null
+fi
+ok "$("$PKG" version 2>/dev/null || echo "$PKG installed")"
+
+# ── 6. Enroll ────────────────────────────────────────────────────────────
+step "Enrolling with $AGENT_HOST"
+enroll_args=(enroll -url "$GATEWAY")
+[ "$FORCE" = 1 ] && enroll_args+=(-force)
+# Older agents do not know the setup flags yet (introduced in 1.1.0).
+enroll_help="$("$PKG" enroll -h 2>&1 || true)"
+if [[ "$enroll_help" == *-channel* ]]; then
+  # Pass both answers explicitly: on a re-enroll the setup should state what
+  # applies instead of leaving an old setting in place.
+  enroll_args+=(-channel "$CHANNEL" "-local-checks=$([ "$LOCAL_CHECKS" = no ] && echo false || echo true)")
+else
+  warn "this agent version cannot set the update channel — set it in the portal"
+fi
+# The clone case is the most common trap: VMs from a template share
+# /etc/machine-id, so the portal takes them for the same machine. The
+# gateway now rejects that — here we offer the way out directly.
+enroll_run() { AGENT_ENROLL_TOKEN="$TOKEN" "$PKG" "${enroll_args[@]}" 2>&1; }
+if ! enroll_out="$(enroll_run)"; then
+  printf '%s\n' "$enroll_out" >&2
+  if [[ "$enroll_out" == *"looks like a clone"* ]] \
+     && { [ "$FIX_CLONE_ID" = 1 ] || { interactive && ask_yesno "Give this machine its own machine-id and try again?" y; }; }; then
+    [ "$FIX_CLONE_ID" = 1 ] && say "machine-id clashes with another host — generating a new one"
+    regenerate_machine_id
+    if ! enroll_out="$(enroll_run)"; then
+      printf '%s\n' "$enroll_out" >&2
+      die "enrollment failed"
+    fi
+  else
+    die "enrollment failed (see the message above)"
+  fi
+fi
+printf '%s\n' "$enroll_out"
+ok "enrolled"
+
+# ── 7. Service ───────────────────────────────────────────────────────────
+step "Service"
+systemctl daemon-reload
+systemctl enable "$PKG" >/dev/null 2>&1 || true
+# restart, not `enable --now`: if an agent was already running here
+# (re-enroll), --now would leave the OLD process running with the OLD token —
+# the connection test then read its 401 in the journal as "token rejected"
+# (seen with portal jobs on servers running an old agent).
+systemctl restart "$PKG"
+# Only look at the journal from here on: the last lines of the dying old
+# process do not belong in the check window.
+started_at="$(date '+%Y-%m-%d %H:%M:%S')"
+ok "$PKG.service started"
+
+# ── 8. Connection test ───────────────────────────────────────────────────
+trap - ERR
+step "Connection"
+result=timeout
+for _ in $(seq 1 20); do
+  logs="$(journalctl -u "$PKG" --since "$started_at" --no-pager 2>/dev/null || true)"
+  if grep -q 'connected to gateway' <<<"$logs"; then result=ok; break; fi
+  if grep -q 'rejected the host token' <<<"$logs"; then result=token; break; fi
+  if ! systemctl is-active --quiet "$PKG"; then result=dead; break; fi
+  sleep 3
+done
+
+case "$result" in
+  ok)
+    ok "the agent is connected — the host shows up in the portal under Monitoring › Servers"
+    say ""
+    say "  status:    $PKG status"
+    say "  logs:      journalctl -u $PKG -f"
+    say "  uninstall: apt-get purge $PKG  (and remove the host in the portal)"
+    ;;
+  token)
+    warn "the gateway rejected the token — it may be expired, used up or revoked"
+    die "create a new enroll token in the portal and run the setup again"
+    ;;
+  dead)
+    warn "$PKG.service is not running"
+    journalctl -u "$PKG" --since "$started_at" --no-pager -n 20 || true
+    die "the agent stopped right after the start (see the log above)"
+    ;;
+  *)
+    warn "no connection to $AGENT_HOST yet — checking why"
+    getent hosts "$AGENT_HOST" >/dev/null 2>&1 || warn "DNS does not resolve $AGENT_HOST"
+    curl -fsS -o /dev/null --max-time 10 "$GATEWAY/healthz" 2>/dev/null \
+      || warn "no HTTPS connection to $GATEWAY/healthz — firewall or proxy?"
+    journalctl -u "$PKG" --since "$started_at" --no-pager -n 20 || true
+    say ""
+    say "The agent keeps retrying. Watch it with: journalctl -u $PKG -f"
+    exit 1
+    ;;
+esac

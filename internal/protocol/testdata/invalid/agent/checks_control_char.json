@@ -1,0 +1,14 @@
+{
+  "type": "checks",
+  "seq": 1,
+  "data": {
+    "t": 1789567890000,
+    "results": [
+      {
+        "plugin": "local",
+        "item": "bell\u0007",
+        "state": 0
+      }
+    ]
+  }
+}

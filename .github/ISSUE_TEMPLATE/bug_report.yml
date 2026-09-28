@@ -1,0 +1,32 @@
+name: Bug report
+description: Something in the agent does not work as expected.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Agent version
+      description: Output of `<brand>-agent version`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: e.g. Debian 12 arm64, Windows Server 2022.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        `journalctl -u <brand>-agent` or the Windows event log, and
+        `<brand>-agent status`. Neither prints the host token.
+      render: text

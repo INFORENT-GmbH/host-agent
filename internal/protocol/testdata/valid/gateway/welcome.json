@@ -1,0 +1,8 @@
+{
+  "type": "welcome",
+  "data": {
+    "protocol": 1,
+    "hostId": "3f2a9c0d1e4b5a6978c8d9e0",
+    "serverTime": 1789567890456
+  }
+}

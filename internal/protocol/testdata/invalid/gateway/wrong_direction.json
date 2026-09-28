@@ -1,0 +1,12 @@
+{
+  "type": "metrics",
+  "data": {
+    "t": 1,
+    "series": [
+      {
+        "name": "a",
+        "value": 1
+      }
+    ]
+  }
+}

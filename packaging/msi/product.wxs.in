@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One template for all brands. The portal's release pipeline renders ${…}
+  when a release is published and builds with wixl (msitools) — on Linux,
+  without a Windows machine. wixl supports only a subset of the WiX schema;
+  everything here has been checked against wixl (ServiceInstall,
+  ServiceControl, Upgrade, RemoveExistingProducts).
+
+  ${MSI_VERSION}   numeric triple — MSI ProductVersion cannot carry a suffix
+  ${FULL_VERSION}  full agent version, as a property for support
+  ${UPGRADE_CODE}  fixed per brand (UUIDv5 of the brand key): this is how an
+                   update recognises the previous version — it must NEVER change
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="${BRAND}-agent" Version="${MSI_VERSION}" Manufacturer="${MAINTAINER}"
+           Language="1033" UpgradeCode="${UPGRADE_CODE}">
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine"
+             Description="${BRAND} host monitoring agent ${FULL_VERSION}"/>
+    <Media Id="1" Cabinet="agent.cab" EmbedCab="yes"/>
+
+    <Property Id="FULLVERSION" Value="${FULL_VERSION}"/>
+    <!-- No Modify/Repair buttons in "Apps": there is nothing to choose. -->
+    <Property Id="ARPNOMODIFY" Value="1"/>
+
+    <!-- Remove previous versions (upgrade), detect and reject newer ones: a
+         downgrade would otherwise run as a second installation next to the
+         newer version. Withdrawing a release is therefore done by
+         uninstalling and reinstalling, never with a downgrade MSI. -->
+    <Upgrade Id="${UPGRADE_CODE}">
+      <UpgradeVersion Minimum="0.0.0" IncludeMinimum="yes"
+                      Maximum="${MSI_VERSION}" IncludeMaximum="no" Property="OLDVERSIONFOUND"/>
+      <UpgradeVersion Minimum="${MSI_VERSION}" IncludeMinimum="no"
+                      OnlyDetect="yes" Property="NEWERVERSIONFOUND"/>
+    </Upgrade>
+    <Condition Message="A newer version of ${BRAND}-agent is already installed.">NOT NEWERVERSIONFOUND</Condition>
+    <InstallExecuteSequence>
+      <RemoveExistingProducts After="InstallValidate"/>
+    </InstallExecuteSequence>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR" Name="${BRAND}-agent">
+          <!-- The Component GUID is fixed per brand (UUIDv5 like the
+               UpgradeCode): the MSI component rules require the same GUID
+               for the same path across versions, and wixl does not support
+               Guid="*". -->
+          <Component Id="agentbin" Guid="${COMPONENT_GUID}" Win64="yes">
+            <File Id="agentexe" Name="${BRAND}-agent.exe" Source="${BRAND}-agent.exe" KeyPath="yes"/>
+            <!-- Service as created by `service install` (cmd/agent/service_windows.go):
+                 LocalSystem, auto-start, argument `run`. Start="install"
+                 only starts it if it was running before or is new; the
+                 setup script enrolls BEFORE the start. Wait on stop, as
+                 with dpkg: the file may only be replaced once the old
+                 process is gone. -->
+            <ServiceInstall Id="agentsvc" Name="${BRAND}-agent" DisplayName="${BRAND}-agent"
+                            Description="${MAINTAINER} host monitoring agent"
+                            Type="ownProcess" Start="auto" ErrorControl="normal"
+                            Account="LocalSystem" Arguments="run"/>
+            <ServiceControl Id="agentsvcctl" Name="${BRAND}-agent"
+                            Start="install" Stop="both" Remove="uninstall" Wait="yes"/>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Main" Level="1">
+      <ComponentRef Id="agentbin"/>
+    </Feature>
+  </Product>
+</Wix>

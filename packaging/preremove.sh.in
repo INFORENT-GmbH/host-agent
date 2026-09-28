@@ -1,0 +1,7 @@
+#!/bin/sh
+# prerm — for deb, $1 is "remove" or "upgrade"; on upgrade the service
+# keeps running (postinst restarts it).
+set -e
+if [ "$1" = "remove" ] && [ -d /run/systemd/system ]; then
+    systemctl disable --now '${BRAND}-agent.service' || true
+fi

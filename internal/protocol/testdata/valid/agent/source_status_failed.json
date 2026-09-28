@@ -1,0 +1,11 @@
+{
+  "type": "source_status",
+  "seq": 43,
+  "data": {
+    "t": 1758480060000,
+    "source": "9f2c1a4b7d8e0f3a5b6c7d8e",
+    "target": "1a2b3c4d5e6f708192a3b4c5",
+    "ok": false,
+    "error": "connect 10.0.0.5:161: request timeout (after 1 retries)"
+  }
+}

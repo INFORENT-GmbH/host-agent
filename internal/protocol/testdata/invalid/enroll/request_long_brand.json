@@ -1,0 +1,13 @@
+{
+  "enrollToken": "ie_9f86d081884c7d659a2feaa0c55ad015",
+  "agentVersion": "1.0.0",
+  "brand": "brand-key-with-25-letters1",
+  "hostname": "web01.example.com",
+  "machineId": "4f1c2d3e4b5a69788796a5b4c3d2e1f0",
+  "os": {
+    "name": "Debian GNU/Linux",
+    "version": "13",
+    "kernel": "6.12.0-1-amd64",
+    "arch": "amd64"
+  }
+}

@@ -1,0 +1,39 @@
+# One template for all brands. build.sh (locally) and the portal's release
+# pipeline set BRAND/VERSION/ARCH/MAINTAINER and render this file and the
+# *.in files into dist/ with sed (nfpm's env substitution does not apply to
+# every field); the package is built from dist/nfpm.yaml.
+name: ${BRAND}-agent
+arch: ${ARCH}
+platform: linux
+version: ${VERSION}
+section: admin
+priority: optional
+maintainer: ${MAINTAINER}
+license: proprietary
+description: |
+  ${BRAND} host monitoring agent
+  Collects metrics, service checks and inventory and streams them to the
+  ${BRAND} portal gateway. Register the host with "${BRAND}-agent enroll".
+scripts:
+  postinstall: dist/postinstall.sh
+  preremove: dist/preremove.sh
+  postremove: dist/postremove.sh
+contents:
+  - src: dist/${BRAND}-agent-${ARCH}
+    dst: /usr/bin/${BRAND}-agent
+    file_info:
+      mode: 0755
+  - src: dist/agent.service
+    dst: /usr/lib/systemd/system/${BRAND}-agent.service
+    file_info:
+      mode: 0644
+  # agent.conf is only created by enroll — deliberately no conffiles; an
+  # update must never touch the file.
+  - dst: /etc/${BRAND}-agent
+    type: dir
+    file_info:
+      mode: 0700
+  - dst: /var/lib/${BRAND}-agent
+    type: dir
+    file_info:
+      mode: 0700
