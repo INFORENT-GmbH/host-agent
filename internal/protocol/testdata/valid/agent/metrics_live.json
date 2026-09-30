@@ -1,0 +1,17 @@
+{
+  "type": "metrics",
+  "seq": 43,
+  "data": {
+    "t": 1789567891000,
+    "live": true,
+    "series": [
+      {
+        "name": "cpu.util_percent",
+        "labels": {
+          "cpu": "total"
+        },
+        "value": 12.5
+      }
+    ]
+  }
+}

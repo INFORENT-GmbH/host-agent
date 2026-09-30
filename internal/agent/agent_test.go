@@ -114,7 +114,14 @@ func TestLiveModeExpiresAndIsNotPersisted(t *testing.T) {
 	defer mu.Unlock()
 	live := 0
 	for _, s := range *out {
-		if s.t == protocol.TypeMetrics && !s.persist {
+		if s.t != protocol.TypeMetrics {
+			continue
+		}
+		// Only live frames carry the flag — the gateway keeps them out of VM.
+		if flagged := s.msg.(*protocol.Metrics).Live; flagged != !s.persist {
+			t.Errorf("metrics frame persist=%v but live=%v", s.persist, flagged)
+		}
+		if !s.persist {
 			live++
 		}
 	}

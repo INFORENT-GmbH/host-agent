@@ -230,7 +230,7 @@ func (l *loop) metrics(ctx context.Context, now time.Time) {
 func (l *loop) liveMetrics(ctx context.Context, now time.Time) {
 	samples, _ := collect.Run(ctx, l.live, l.disabled, now)
 	if len(samples) > 0 {
-		l.sendOrLog(protocol.TypeMetrics, &protocol.Metrics{Time: now.UnixMilli(), Series: samples}, false)
+		l.sendOrLog(protocol.TypeMetrics, &protocol.Metrics{Time: now.UnixMilli(), Live: true, Series: samples}, false)
 	}
 }
 

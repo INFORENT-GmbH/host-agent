@@ -120,9 +120,14 @@ func hostIdentity(hostname, machineID string, os OSInfo) error {
 // device it polled (the device's public_id). Empty means "this host" — the
 // normal case. The gateway only accepts a target that is really assigned to
 // the sending satellite; see the gateway's session handling.
+//
+// Live marks a frame of the fast live mode (see Live): shown in the portal,
+// never stored — the gateway keeps it out of the time-series database, which
+// gets the regular metrics ticks only. Older gateways ignore the field.
 type Metrics struct {
 	Time   int64    `json:"t"`
 	Target string   `json:"target,omitempty"`
+	Live   bool     `json:"live,omitempty"`
 	Series []Sample `json:"series"`
 }
 

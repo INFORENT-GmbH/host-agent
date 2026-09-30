@@ -155,16 +155,21 @@ func (m *Manager) ReportPending(ctx context.Context) {
 	// other reason). If it succeeds we die and the next start reports it;
 	// otherwise the deadline turns it into a failure.
 	m.log.Info("update still pending", "version", p.Version, "deadline_in", wait)
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-time.After(wait):
-			if q, ok := m.readPending(); ok && q.Version == p.Version {
-				m.clearPending()
-				m.fail(p.Version, "agent still runs "+m.version+" after the update")
-			}
+	go m.settleByDeadline(ctx, p)
+}
+
+// settleByDeadline waits until the pending update's deadline and then reports
+// it as failed if it is still pending — unless this process is stopped first
+// (the restarted agent reports then).
+func (m *Manager) settleByDeadline(ctx context.Context, p pending) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(p.StartedAt.Add(m.runTimeout).Sub(m.now())):
+		if q, ok := m.readPending(); ok && q.Version == p.Version {
+			m.clearPending()
+			m.fail(p.Version, "agent still runs "+m.version+" after the update")
 		}
-	}()
+	}
 }
 
 func (m *Manager) fail(version, msg string) {
