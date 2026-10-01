@@ -36,9 +36,15 @@ func (filesystemCollector) Name() string { return "filesystem" }
 
 func (filesystemCollector) Collect(ctx context.Context, _ time.Time) ([]protocol.Sample, error) {
 	fss, err := Filesystems(ctx)
+	// A fresh resolver per tick: a disk attached at runtime shows up with
+	// its id on the next collection, not after an agent restart.
+	ids := newDiskIDResolver()
 	var out []protocol.Sample
 	for _, fs := range fss {
 		labels := map[string]string{"mount": fs.Mount, "fstype": fs.Fstype, "device": fs.Device}
+		if id := ids.resolve(fs.Device); id != "" {
+			labels["disk_id"] = id
+		}
 		out = append(out,
 			sample("fs.size_bytes", float64(fs.Usage.Total), labels),
 			sample("fs.used_bytes", float64(fs.Usage.Used), labels),
