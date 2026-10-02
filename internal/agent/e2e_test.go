@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -240,8 +242,13 @@ func TestEndToEndResendAfterRestart(t *testing.T) {
 		_, fs := g.snapshot()
 		return len(fs) >= 2*len(first)+1
 	})
-	time.Sleep(200 * time.Millisecond) // let the acks reach the buffer
+	// Wait until the buffer has persisted the acks for everything sent so far,
+	// instead of a fixed sleep — on a loaded CI runner 200 ms was not enough.
+	_, sent := g.snapshot()
+	sentUpTo := slices.Max(seqs(sent))
+	waitFor(t, "acks persisted", func() bool { return ackedSeq(t, b) >= sentUpTo })
 	stop()
+	ackedAtStop := ackedSeq(t, b)
 	hellos2, all := g.snapshot()
 	second := all[len(first):]
 	if hellos2[1].SeqEpoch != hellos[0].SeqEpoch {
@@ -262,7 +269,23 @@ func TestEndToEndResendAfterRestart(t *testing.T) {
 	})
 	stop()
 	_, all3 := g.snapshot()
-	if next := all3[len(all)].seq; next <= secondSeqs[len(secondSeqs)-1] {
-		t.Errorf("acked frames resent: third session starts at seq %d, second ended at %d", next, secondSeqs[len(secondSeqs)-1])
+	// Frames sent after the last persisted ack may legitimately be resent;
+	// nothing at or below the acked seq may.
+	if next := all3[len(all)].seq; next <= ackedAtStop {
+		t.Errorf("acked frames resent: third session starts at seq %d, acked up to %d", next, ackedAtStop)
 	}
+}
+
+// ackedSeq reads the buffer's persisted ack mark (buffer.Ack → file "acked"); 0 if none yet.
+func ackedSeq(t *testing.T, b brand.Brand) uint64 {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(b.StateDir(), "buffer", "acked"))
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.ParseUint(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
