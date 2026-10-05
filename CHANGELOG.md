@@ -4,6 +4,19 @@ Every released version of the agent, newest first. A version that changes
 shipped code gets a section here in the same change that bumps `VERSION`.
 The portal shows these notes next to each release.
 
+## 1.12.0 - 2026-10-05
+
+- Memory on Linux is now broken down into free memory, page cache, buffers
+  and shared memory (tmpfs), so memory held by programs can be told apart
+  from cache the kernel hands back on demand.
+- New `processes` collector: every 30 s the ten process names holding the
+  most memory (private memory on Linux, working set on Windows), summed per
+  name with the number of processes, plus the total number of processes and
+  (Linux) zombies. Only names are sent, never command lines.
+- New `kernel` collector (Linux): pressure stall information for CPU, memory
+  and I/O, OOM kills since boot, running and blocked tasks, open file
+  handles and TCP sockets (in use, TIME_WAIT).
+
 ## 1.11.2 - 2026-10-05
 
 - Windows self-update: the release manifest must carry a valid signature by

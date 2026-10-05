@@ -31,11 +31,13 @@ func Default() []Collector {
 		&cpuCollector{},
 		loadCollector{},
 		memoryCollector{},
+		&processesCollector{},
 		filesystemCollector{},
 		&diskIOCollector{},
 		&networkCollector{},
 		systemCollector{},
 		timeSyncCollector{},
+		kernelCollector{},
 	}
 }
 

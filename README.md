@@ -15,8 +15,10 @@ exactly what runs on their machine.
 
 ## Features
 
-- **Metrics** — CPU, memory, filesystems, disk I/O, network throughput, link
-  state and time synchronisation. Collectors report raw values; thresholds and
+- **Metrics** — CPU, memory (with cache breakdown on Linux), the processes
+  using the most memory, filesystems, disk I/O, network throughput, link
+  state, time synchronisation and (Linux) kernel pressure, OOM kills, blocked
+  tasks, file handles and TCP sockets. Collectors report raw values; thresholds and
   states are evaluated server-side.
 - **Service checks with discovery** — filesystems, network interfaces, systemd
   units or Windows services, load, CPU, memory, uptime, time sync, pending
