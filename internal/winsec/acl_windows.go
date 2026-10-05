@@ -4,6 +4,7 @@ package winsec
 
 import (
 	"fmt"
+	"os"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -36,6 +37,23 @@ func CheckPath(path string) error {
 		return fmt.Errorf("%w: reading the DACL of %s: %v", ErrInsecure, path, err)
 	}
 	return Evaluate(path, owner.String(), entries)
+}
+
+// CheckDir judges a directory the agent writes into as LocalSystem — the
+// state directory, where the self-update puts the MSI that msiexec then runs.
+// It must be a plain directory (EvaluateDir, on the Lstat result) and pass
+// the same owner and DACL rule as agent.conf. Without it, any local user who
+// created the directory below %ProgramData% before the agent was installed
+// would stay its owner and could swap the installer.
+func CheckDir(path string) error {
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrInsecure, err)
+	}
+	if err := EvaluateDir(path, fi.Mode()); err != nil {
+		return err
+	}
+	return CheckPath(path)
 }
 
 // aclEntries flattens a DACL. Only allow entries carry a SID the judgement

@@ -2,6 +2,7 @@ package winsec
 
 import (
 	"errors"
+	"io/fs"
 	"testing"
 )
 
@@ -89,5 +90,22 @@ func TestPrivilegedIsCaseInsensitive(t *testing.T) {
 	}
 	if privileged("S-1-5-32-545") {
 		t.Fatal("the Users group must not count as privileged")
+	}
+}
+
+func TestEvaluateDir(t *testing.T) {
+	if err := EvaluateDir(`C:\ProgramData\acme-agent\state`, fs.ModeDir|0o777); err != nil {
+		t.Fatalf("plain directory rejected: %v", err)
+	}
+	for _, mode := range []fs.FileMode{
+		0o666,                         // a file where the directory should be
+		fs.ModeSymlink | 0o777,        // symlink
+		fs.ModeDir | fs.ModeIrregular, // junction / other reparse point (Go ≥ 1.23)
+		fs.ModeIrregular,
+	} {
+		err := EvaluateDir(`C:\ProgramData\acme-agent\state`, mode)
+		if !errors.Is(err, ErrInsecure) {
+			t.Errorf("mode %v: got %v, want ErrInsecure", mode, err)
+		}
 	}
 }

@@ -51,8 +51,9 @@ design keeps the portal's reach deliberately small:
   request live mode and trigger an update to a released version — nothing
   else. Anything outside the protocol is rejected.
 - **Updates come only from the brand's own package source** — apt verifies the
-  repository signature; on Windows the MSI must match the SHA-256 from the
-  release manifest.
+  repository signature; on Windows the release manifest must carry a valid
+  signature by the release key built into the agent
+  (`internal/update/releasekeys/`), and the MSI must match its SHA-256.
 - **Configuration and scripts are permission-checked.** `agent.conf` carries
   the host token and is refused unless it is owned by root (or SYSTEM and
   Administrators on Windows) and unreadable for others. Local check scripts

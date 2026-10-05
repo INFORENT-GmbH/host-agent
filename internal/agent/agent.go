@@ -50,6 +50,9 @@ type gatewayMsg struct {
 
 // Run connects and works until ctx ends.
 func Run(ctx context.Context, b brand.Brand, cfg config.Config, log *slog.Logger) error {
+	if err := prepareStateDir(b); err != nil {
+		return err
+	}
 	buf, err := buffer.Open(filepath.Join(b.StateDir(), "buffer"), bufferMaxBytes, bufferMaxAge)
 	if err != nil {
 		return fmt.Errorf("send buffer: %w", err)

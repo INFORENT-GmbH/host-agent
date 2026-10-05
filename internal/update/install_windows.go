@@ -8,12 +8,15 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/INFORENT-GmbH/host-agent/internal/winsec"
 	"golang.org/x/sys/windows"
 )
 
-// run performs the Windows self-update: fetch the per-version manifest and the
-// MSI it names over TLS from the brand's own host, verify the MSI against the
-// manifest's SHA-256, then hand it to a DETACHED msiexec.
+// run performs the Windows self-update: fetch the per-version manifest, its
+// detached signature and the MSI it names over TLS from the brand's own host,
+// verify the signature against the compiled-in release keys (signature.go)
+// and the MSI against the manifest's SHA-256, then hand it to a DETACHED
+// msiexec.
 //
 // Detached is essential and the whole reason this differs from Linux. Windows
 // Installer stops this very service (the MSI's ServiceControl table) to replace
@@ -43,10 +46,26 @@ func (m *Manager) run(ctx context.Context, version string) {
 	fctx, cancel := context.WithTimeout(ctx, m.runTimeout)
 	defer cancel()
 
-	man, err := m.httpGet(fctx, manifestURL(m.packageBase, version))
+	manURL := manifestURL(m.packageBase, version)
+	man, err := m.httpGet(fctx, manURL)
 	if err != nil {
 		m.clearPending()
 		m.fail(version, "fetching the update manifest: "+oneLine(err.Error()))
+		return
+	}
+	sig, err := m.httpGet(fctx, signatureURL(manURL))
+	if err != nil {
+		m.clearPending()
+		m.fail(version, "fetching the manifest signature: "+oneLine(err.Error()))
+		return
+	}
+	ring, err := releaseKeys()
+	if err == nil {
+		err = verifyManifestSignature(ring, man, sig)
+	}
+	if err != nil {
+		m.clearPending()
+		m.fail(version, oneLine(err.Error()))
 		return
 	}
 	mf, err := parseManifest(man, version)
@@ -68,19 +87,35 @@ func (m *Manager) run(ctx context.Context, version string) {
 	}
 
 	// The MSI goes to the state directory, not %TEMP%: it must outlive this
-	// process, which msiexec is about to kill, and the state directory is
-	// already locked to privileged accounts (internal/winsec).
-	msiPath := filepath.Join(m.b.StateDir(), "update-"+version+".msi")
-	logPath := filepath.Join(m.b.StateDir(), "update-"+version+".log")
-	if err := os.WriteFile(msiPath, body, 0o600); err != nil { // #nosec G306 -- privileged state dir
+	// process, which msiexec is about to kill. msiexec runs it as LocalSystem,
+	// so the directory is checked right here — owner and DACL privileged, a
+	// plain directory and not a junction (winsec.CheckDir) — and the file gets
+	// an unpredictable name, so nobody can stage or swap it between our write
+	// and msiexec's read. Installers of earlier runs are removed first.
+	stateDir := m.b.StateDir()
+	if err := winsec.CheckDir(stateDir); err != nil {
 		m.clearPending()
-		m.fail(version, "saving the installer: "+err.Error())
+		m.fail(version, "state directory: "+oneLine(err.Error()))
+		return
+	}
+	removeOldInstallers(stateDir)
+	msiPath, err := writeInstaller(stateDir, version, body)
+	if err != nil {
+		m.clearPending()
+		m.fail(version, "saving the installer: "+oneLine(err.Error()))
+		return
+	}
+	logPath := filepath.Join(stateDir, "update-"+version+".log")
+	sysDir, err := windows.GetSystemDirectory()
+	if err != nil {
+		m.clearPending()
+		m.fail(version, "locating msiexec: "+err.Error())
 		return
 	}
 
 	// /qn silent, /norestart so a pending-reboot MSI never reboots the host on
 	// its own; /l*v leaves a verbose log for the acceptance run's post-mortem.
-	cmd := exec.Command("msiexec", "/i", msiPath, "/qn", "/norestart", "/l*v", logPath) // #nosec G204 -- state-dir paths, validated version
+	cmd := exec.Command(filepath.Join(sysDir, "msiexec.exe"), "/i", msiPath, "/qn", "/norestart", "/l*v", logPath) // #nosec G204 -- state-dir paths, validated version
 	// Detach: a new process group that breaks away from our job object, so the
 	// installer survives the service stop it is about to trigger.
 	cmd.SysProcAttr = &windows.SysProcAttr{
@@ -96,4 +131,34 @@ func (m *Manager) run(ctx context.Context, version string) {
 	_ = cmd.Process.Release()
 
 	m.waitForRestart(ctx, version)
+}
+
+// writeInstaller stores the verified MSI under a random name in the state
+// directory. CreateTemp opens it exclusively (CREATE_NEW), so a name planted
+// in advance makes the write fail instead of being followed.
+func writeInstaller(dir, version string, body []byte) (string, error) {
+	f, err := os.CreateTemp(dir, "update-"+version+"-*.msi")
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.Write(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// removeOldInstallers deletes the MSIs earlier updates left behind; their
+// logs (one per version) stay for the post-mortem. Best effort: a leftover file costs disk
+// space, not safety.
+func removeOldInstallers(dir string) {
+	old, _ := filepath.Glob(filepath.Join(dir, "update-*.msi"))
+	for _, p := range old {
+		_ = os.Remove(p)
+	}
 }

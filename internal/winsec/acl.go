@@ -3,6 +3,7 @@ package winsec
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 )
 
@@ -71,6 +72,18 @@ func Evaluate(path, owner string, entries []Entry) error {
 			continue
 		}
 		return fmt.Errorf("%w: %s grants access (mask 0x%08x) to %s", ErrInsecure, path, e.Mask, e.SID)
+	}
+	return nil
+}
+
+// EvaluateDir is the part of the directory check that precedes the DACL: the
+// path must be a plain directory. A junction, symlink or other reparse point
+// would let whoever placed it redirect what the agent writes there — the
+// owner and DACL it reports are those of the link, not of where the data
+// lands. mode comes from Lstat, which does not follow the link.
+func EvaluateDir(path string, mode fs.FileMode) error {
+	if mode.Type() != fs.ModeDir {
+		return fmt.Errorf("%w: %s is not a plain directory (mode %s) — a junction or link here could redirect the agent's files", ErrInsecure, path, mode.Type())
 	}
 	return nil
 }

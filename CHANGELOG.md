@@ -4,6 +4,17 @@ Every released version of the agent, newest first. A version that changes
 shipped code gets a section here in the same change that bumps `VERSION`.
 The portal shows these notes next to each release.
 
+## 1.11.2 - 2026-10-05
+
+- Windows self-update: the release manifest must carry a valid signature by
+  the release key built into the agent; an unsigned or foreign-signed
+  manifest is refused. Previously the MSI was only checked against the
+  checksum in that same, unsigned manifest.
+- Windows: the agent refuses to start when its configuration or state
+  directory is not owned and writable by SYSTEM/Administrators only, or is a
+  junction. The self-update writes the installer under a random name and
+  starts `msiexec` from the system directory.
+
 ## 1.11.1 - 2026-10-04
 
 - Updated dependencies (gopsutil 4.26.9, go-ole 1.3.0). No behaviour change.

@@ -1,0 +1,8 @@
+{
+  "version": "1.11.0",
+  "os": "windows",
+  "arch": "amd64",
+  "file": "inforent-agent-1.11.0.msi",
+  "sha256": "ca509d4163470d88225c312b7390f485862797e3ce7fe497abd52e9759624be5",
+  "size": 3923968
+}

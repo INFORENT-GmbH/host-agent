@@ -102,6 +102,20 @@ function Protect-ConfigDir {
   }
   $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-18')))
   Set-Acl -Path $ConfigDir -AclObject $acl
+
+  # Any local user may create directories below %ProgramData%. A "state"
+  # directory planted before this setup keeps its owner and ACL — the agent
+  # would stage its self-update there — so the agent refuses to start on it.
+  # Say so here, before installing anything.
+  $state = Join-Path $ConfigDir 'state'
+  if (Test-Path -LiteralPath $state) {
+    $item = Get-Item -LiteralPath $state -Force
+    $owner = (Get-Acl -LiteralPath $state).GetOwner([Security.Principal.SecurityIdentifier]).Value
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        ($owner -notin @('S-1-5-18', 'S-1-5-32-544'))) {
+      Die "$state was not created by this setup (owner $owner). Remove it, then run the setup again."
+    }
+  }
 }
 
 # ── Main flow ─────────────────────────────────────────────────────────────

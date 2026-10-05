@@ -13,8 +13,9 @@ import (
 
 // manifest is one entry of <packageBase>/windows/<version>.json, as the
 // portal's release pipeline publishes it. It names
-// the MSI and its SHA-256; the agent trusts it because it comes over TLS from
-// the brand's own host, and it downloads exactly this file and no other.
+// the MSI and its SHA-256; the agent trusts it only after its detached
+// signature verified against the compiled-in release keys (signature.go), and
+// it downloads exactly this file and no other.
 //
 // This parsing and the checks around it live in an untagged file so they run
 // in the Linux tests too.
