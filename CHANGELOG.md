@@ -4,6 +4,12 @@ Every released version of the agent, newest first. A version that changes
 shipped code gets a section here in the same change that bumps `VERSION`.
 The portal shows these notes next to each release.
 
+## 1.12.1 - 2026-10-09
+
+- Built with Go 1.27.2, which fixes security issues in the standard
+  library's HTTP/2 client and MIME header parsing used by the agent's
+  connection to the portal.
+
 ## 1.12.0 - 2026-10-05
 
 - Memory on Linux is now broken down into free memory, page cache, buffers
