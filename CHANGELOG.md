@@ -4,6 +4,12 @@ Every released version of the agent, newest first. A version that changes
 shipped code gets a section here in the same change that bumps `VERSION`.
 The portal shows these notes next to each release.
 
+## 1.12.2 - 2026-10-21
+
+- Built with Go 1.27.3, which makes the standard library distrust
+  compromised intermediate certificates when verifying the portal's TLS
+  certificate.
+
 ## 1.12.1 - 2026-10-09
 
 - Built with Go 1.27.2, which fixes security issues in the standard
